@@ -1,0 +1,8 @@
+# created by virtualenv automatically
+Release/
+images/
+build/
+docs/
+dist/
+.build/
+.DS_Store
