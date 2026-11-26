@@ -3,7 +3,7 @@ import AppKit
 
 enum AppInfo {
     static let name = "AndroidConnection"
-    static let version = "1.2.10"
+    static let version = "1.2.19"
     static let build = "1"
     static let scrcpyServerVersion = "5.0.1"
 }
@@ -143,6 +143,7 @@ struct SettingsContent: View {
                 header
                 mirrorSection
                 keyboardSection
+                mouseSection
                 fileSection
                 connectionSection
                 wirelessSection
@@ -210,10 +211,9 @@ struct SettingsContent: View {
                     Text("\(value) Mbps").tag(value)
                 }
             }
-            Toggle("投屏时保持手机屏幕常亮", isOn: $settings.keepScreenAwake)
             Toggle("转发手机播放声音到 Mac", isOn: $settings.audioForwarding)
-            Toggle("投屏时关闭手机屏幕（画面和触控继续）", isOn: $settings.autoScreenOff)
-            Text("优先通过 scrcpy 控制通道关闭手机显示电源，物理屏幕熄灭但 SurfaceFlinger 继续合成，因此投屏画面、点击和键盘操作都不受影响；若控制通道不可用，则回退到最低亮度。音频捕获需要 Android 13 或更高版本。画质与码率修改只重启画面，不会打断音频。")
+            Toggle("投屏时关闭手机屏幕（关闭则保持常亮）", isOn: $settings.autoScreenOff)
+            Text("开启后投屏 3 秒自动熄灭手机物理屏幕；关闭后保持手机屏幕常亮并阻止自动锁屏。两种状态都只影响手机屏幕，投屏画面、点击和键盘操作始终可用。优先通过 scrcpy 控制通道关闭显示电源，物理屏幕熄灭但 SurfaceFlinger 继续合成；若控制通道不可用，则回退到最低亮度。音频捕获需要 Android 13 或更高版本。画质与码率修改只重启画面，不会打断音频。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -223,6 +223,41 @@ struct SettingsContent: View {
 
     private var keyboardSection: some View {
         KeyboardMappingEditor(settings: settings)
+    }
+
+    private var mouseSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "鼠标映射", subtitle: "投屏画面中的按键与滚轮方向")
+
+            Picker("右键", selection: $settings.mouseMapping.right) {
+                ForEach(MouseButtonAction.allCases) { action in
+                    Text(action.title).tag(action)
+                }
+            }
+            Picker("中键", selection: $settings.mouseMapping.middle) {
+                ForEach(MouseButtonAction.allCases) { action in
+                    Text(action.title).tag(action)
+                }
+            }
+            Picker("滚轮方向", selection: $settings.scrollDirection) {
+                ForEach(MouseScrollDirection.allCases) { direction in
+                    Text(direction.title).tag(direction)
+                }
+            }
+            Text("左键点击和拖动仍用于手机触控；右键、中键只在投屏画面获得焦点时生效。默认右键返回、中键打开多任务。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            HStack {
+                Button("恢复默认鼠标映射") {
+                    settings.mouseMapping = .defaults
+                    settings.scrollDirection = .normal
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                Spacer()
+            }
+        }
+        .font(.callout)
+        .card()
     }
 
     private var fileSection: some View {

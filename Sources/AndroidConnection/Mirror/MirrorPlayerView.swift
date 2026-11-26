@@ -7,10 +7,13 @@ final class MirrorPlayerView: NSView {
     var onSwipe: ((CGPoint, CGPoint) -> Void)?
     var onKeyDown: ((NSEvent) -> Void)?
     var onScroll: ((CGFloat) -> Void)?
+    var onRightClick: (() -> Void)?
+    var onMiddleClick: (() -> Void)?
 
     private(set) var videoSize: CGSize = .zero
     private var pressPoint: CGPoint?
     private var scrollAccumulator: CGFloat = 0
+    private var mouseMonitor: Any?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -28,8 +31,42 @@ final class MirrorPlayerView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        removeMouseMonitor()
+    }
+
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        removeMouseMonitor()
+        guard window != nil else { return }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .otherMouseDown]) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            let point = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(point) else { return event }
+
+            if event.type == .rightMouseDown {
+                self.window?.makeFirstResponder(self)
+                self.onRightClick?()
+                return nil
+            }
+            if event.type == .otherMouseDown, event.buttonNumber == 2 {
+                self.window?.makeFirstResponder(self)
+                self.onMiddleClick?()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeMouseMonitor() {
+        if let mouseMonitor {
+            NSEvent.removeMonitor(mouseMonitor)
+            self.mouseMonitor = nil
+        }
+    }
 
     func display(_ pixelBuffer: CVPixelBuffer, size: CGSize) {
         videoSize = size
@@ -60,6 +97,20 @@ final class MirrorPlayerView: NSView {
         } else if let from = normalized(start), let to = normalized(end) {
             onSwipe?(from, to)
         }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        onRightClick?()
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2 else {
+            super.otherMouseDown(with: event)
+            return
+        }
+        window?.makeFirstResponder(self)
+        onMiddleClick?()
     }
 
     override func scrollWheel(with event: NSEvent) {

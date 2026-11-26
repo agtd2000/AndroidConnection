@@ -43,10 +43,15 @@ final class MirrorSession: ObservableObject {
     private var orientationNoticeToken = UUID()
     private var screenHoldUntil: Date?
     private var orientationMonitorTask: Task<Void, Never>?
+    /// True only while this app has temporarily locked `wm user-rotation`.
+    /// The phone's own auto-rotate/sensor state always wins: enabling
+    /// auto-rotate or changing the phone rotation releases this override.
+    private var softwareRotationActive = false
+    private var softwareRotationTarget: String?
+    private var lastRotationPolicyCheck = Date.distantPast
+    private var rotationReleaseTask: Task<Void, Never>?
     /// Set when this mirror session changed the panel direction, either via
-    /// the rotate button or a physical rotation. On stop we must not trust the
-    /// captured "original" if it was already landscape: leave the phone in a
-    /// portrait, unlockable state instead of restoring a stale landscape lock.
+    /// the rotate button or a physical rotation. Kept for logging/diagnostics.
     private var didChangeOrientation = false
     private var savedBrightness: String?
     private var savedBrightnessMode: String?
@@ -77,6 +82,8 @@ final class MirrorSession: ObservableObject {
 
     deinit {
         restartTask?.cancel()
+        orientationMonitorTask?.cancel()
+        rotationReleaseTask?.cancel()
     }
 
     func attach(_ view: MirrorPlayerView) {
@@ -85,7 +92,12 @@ final class MirrorSession: ObservableObject {
         view.onTap = { [weak self] point in self?.tap(point) }
         view.onSwipe = { [weak self] from, to in self?.swipe(from: from, to: to) }
         view.onKeyDown = { [weak self] event in self?.handleKey(event) }
-        view.onScroll = { [weak self] direction in self?.scroll(direction) }
+        view.onScroll = { [weak self] direction in
+            guard let self else { return }
+            self.scroll(direction * self.settings.scrollDirection.multiplier)
+        }
+        view.onRightClick = { [weak self] in self?.handleMouseButton(.right) }
+        view.onMiddleClick = { [weak self] in self?.handleMouseButton(.middle) }
         view.window?.makeFirstResponder(view)
     }
 
@@ -95,6 +107,11 @@ final class MirrorSession: ObservableObject {
         intentionallyStopped = false
         errorMessage = nil
         status = "正在启动投屏…"
+
+        // Clear a direction override left by an older build or an abnormal
+        // exit before this session starts. Temporary overrides are only
+        // enabled later for the short rotate/portrait transitions.
+        _ = try? await adb.shell("wm fixed-to-user-rotation disabled", serial: serial, timeout: 8)
 
         // Start the video channel first. The separate scrcpy audio server
         // needs its own forwarded port; starting both at once can race the
@@ -253,7 +270,7 @@ final class MirrorSession: ObservableObject {
             }
             control?.keepsUSBWake = true
             startUSBKeepAlive()
-        } else if settings.keepScreenAwake && !settings.autoScreenOff {
+        } else if !settings.autoScreenOff {
             _ = try? await adb.shell("svc power stayon usb", serial: serial, timeout: 8)
             _ = try? await adb.shell("input keyevent 224", serial: serial, timeout: 8)
         }
@@ -301,6 +318,10 @@ final class MirrorSession: ObservableObject {
         stopAudio()
         restartTask?.cancel()
         restartTask = nil
+        if restoreRotation {
+            rotationReleaseTask?.cancel()
+            rotationReleaseTask = nil
+        }
         usbKeepAliveTask?.cancel()
         usbKeepAliveTask = nil
         control?.keepsUSBWake = false
@@ -330,7 +351,24 @@ final class MirrorSession: ObservableObject {
         if restoreRotation {
             restoreRotationIfNeeded()
         }
+        // Do not leave the last landscape frame size/label behind after the
+        // phone has been released back to its own rotation policy.
+        videoSize = .zero
+        sourceSize = .zero
+        logicalSize = .zero
+        resolutionLabel = "—"
         status = "已停止投屏"
+        if restoreRotation {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                guard let self, !self.isRunning, !self.isStarting else { return }
+                if let size = await self.currentRotationSize(), size.width > 0, size.height > 0 {
+                    self.sourceSize = size
+                    self.orientationLandscape = size.width > size.height
+                    AppLog.write("stop display size=\(Int(size.width))x\(Int(size.height)) landscape=\(size.width > size.height)")
+                }
+            }
+        }
         if wasRunning, restoreRotation {
             onStopped?()
         }
@@ -458,6 +496,10 @@ final class MirrorSession: ObservableObject {
     func setOrientation(landscape: Bool) async {
         guard isRunning, !isStarting, !isTransitioning else { return }
         if orientationLandscape == landscape { return }
+
+        // A button press is a short-lived request. It never becomes a
+        // permanent phone setting: the release task or a phone-side rotation
+        // change hands control back to the sensor.
         didChangeOrientation = true
         await captureRotationIfNeeded()
 
@@ -524,10 +566,126 @@ final class MirrorSession: ObservableObject {
                 view?.clear()
                 status = "旋转失败"
                 errorMessage = error.localizedDescription
+                // A failed video restart must not leave the phone locked in
+                // the requested direction; restore portrait and release wm.
+                restoreRotationIfNeeded()
             }
         }
     }
 
+    private struct PhoneRotationState {
+        let autoRotation: String?
+        let userRotation: String?
+        let fixedRotation: String?
+    }
+
+    /// Read the phone's current rotation policy in one shell round-trip.
+    private func phoneRotationState() async -> PhoneRotationState? {
+        let command = "settings get system accelerometer_rotation; wm user-rotation; wm fixed-to-user-rotation"
+        guard let result = try? await adb.shell(command, serial: serial, timeout: 8),
+              result.succeeded else { return nil }
+        let lines = result.output
+            .components(separatedBy: .newlines)
+            .map { $0.trimmed }
+            .filter { !$0.isEmpty }
+        guard lines.count >= 3 else { return nil }
+        return PhoneRotationState(autoRotation: lines[0], userRotation: lines[1], fixedRotation: lines[2])
+    }
+
+    /// Hand control back to the phone. A temporary button rotation restores
+    /// the captured phone policy; a phone-initiated change adopts the phone's
+    /// new choice so stop() does not undo it.
+    private func releaseSoftwareRotationToPhone(adoptPhonePolicy: Bool = true) async {
+        guard softwareRotationActive else { return }
+        rotationReleaseTask?.cancel()
+        rotationReleaseTask = nil
+        softwareRotationActive = false
+        softwareRotationTarget = nil
+
+        if !adoptPhonePolicy {
+            await restoreCapturedRotationPolicy()
+            AppLog.write("rotation temporary lock released to captured phone policy")
+            showOrientationNotice("临时旋转结束，已交还手机方向控制", seconds: 4)
+            return
+        }
+
+        guard let state = await phoneRotationState() else {
+            _ = try? await adb.shell("wm user-rotation free", serial: serial, timeout: 8)
+            return
+        }
+        if state.fixedRotation == "enabled" {
+            _ = try? await adb.shell("wm fixed-to-user-rotation disabled", serial: serial, timeout: 8)
+        }
+
+        if state.autoRotation == "1" {
+            _ = try? await adb.shell("wm user-rotation free", serial: serial, timeout: 8)
+            originalRotation = (userRotation: "free", fixedRotation: "disabled")
+            originalAccelerometerRotation = "1"
+            originalUserRotationSetting = nil
+        } else if let user = state.userRotation, user.hasPrefix("lock") {
+            originalRotation = (userRotation: user, fixedRotation: "disabled")
+            originalAccelerometerRotation = "0"
+            originalUserRotationSetting = user.split(separator: " ").last.map(String.init)
+        } else {
+            originalRotation = (userRotation: state.userRotation ?? "free", fixedRotation: "disabled")
+            originalAccelerometerRotation = state.autoRotation ?? originalAccelerometerRotation
+        }
+        AppLog.write("rotation released to phone auto=\(state.autoRotation ?? "nil") user=\(state.userRotation ?? "nil") fixed=\(state.fixedRotation ?? "nil")")
+        showOrientationNotice("已交还手机方向控制", seconds: 4)
+    }
+
+    private func scheduleTemporaryRotationRelease() {
+        rotationReleaseTask?.cancel()
+        rotationReleaseTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard let self, !Task.isCancelled, self.softwareRotationActive else { return }
+            AppLog.write("rotation temporary lock expired")
+            await self.releaseSoftwareRotationToPhone(adoptPhonePolicy: false)
+        }
+    }
+
+    private func restoreCapturedRotationPolicy() async {
+        let original = originalRotation
+        _ = try? await adb.shell("wm fixed-to-user-rotation disabled", serial: serial, timeout: 8)
+        if originalAccelerometerRotation == "1" || original?.userRotation == "free" || original?.userRotation == nil {
+            _ = try? await adb.shell("wm user-rotation free", serial: serial, timeout: 8)
+        } else if let user = original?.userRotation, user.hasPrefix("lock") {
+            _ = try? await adb.shell("wm user-rotation \(user)", serial: serial, timeout: 8)
+        } else {
+            _ = try? await adb.shell("wm user-rotation free", serial: serial, timeout: 8)
+        }
+        if let userSetting = originalUserRotationSetting {
+            _ = try? await adb.shell("settings put system user_rotation \(userSetting)", serial: serial, timeout: 8)
+        }
+        if let accelerometer = originalAccelerometerRotation {
+            _ = try? await adb.shell("settings put system accelerometer_rotation \(accelerometer)", serial: serial, timeout: 8)
+        }
+        AppLog.write("rotation policy restored fixed=disabled user=\(original?.userRotation ?? "free") accel=\(originalAccelerometerRotation ?? "nil") setting=\(originalUserRotationSetting ?? "nil")")
+    }
+
+    /// While a software lock is active, watch for the phone taking control:
+    /// auto-rotate switched on, the user-rotation lock changed, or the fixed
+    /// rotation flag set elsewhere. The app must never fight the phone.
+    private func checkPhoneRotationOverride() async {
+        guard softwareRotationActive else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastRotationPolicyCheck) > 2.5 else { return }
+        lastRotationPolicyCheck = now
+        guard let state = await phoneRotationState() else { return }
+
+        let changedByPhone = state.autoRotation == "1"
+            || (softwareRotationTarget.map { state.userRotation != "lock \($0)" } ?? false)
+        guard changedByPhone else { return }
+
+        AppLog.write("rotation phone override auto=\(state.autoRotation ?? "nil") user=\(state.userRotation ?? "nil") fixed=\(state.fixedRotation ?? "nil")")
+        await releaseSoftwareRotationToPhone()
+    }
+
+    /// Ask the phone for a temporary direction. The short release task and
+    /// the phone-state monitor make this a request, not a persistent lock.
+    /// Xiaomi needs `fixed-to-user-rotation` for the few seconds of the
+    /// transition; it is always disabled on release/stop so third-party
+    /// fullscreen/requestedOrientation is not permanently blocked.
     private func applyRotation(landscape: Bool) async -> Bool {
         let target = landscape ? "1" : "0"
         let commands = [
@@ -546,6 +704,12 @@ final class MirrorSession: ObservableObject {
                 AppLog.write("rotation cmd=\(command) error=\(error.localizedDescription)")
                 succeeded = false
             }
+        }
+        if succeeded {
+            softwareRotationActive = true
+            softwareRotationTarget = target
+            lastRotationPolicyCheck = Date()
+            scheduleTemporaryRotationRelease()
         }
         return succeeded
     }
@@ -567,7 +731,7 @@ final class MirrorSession: ObservableObject {
             showOrientationNotice("手机系统未切换为\(label)，请确认手机已解锁且未锁定方向。", seconds: 8)
             return
         }
-        var text = "手机已切换为\(landscape ? "横屏" : "竖屏")"
+        var text = "手机已临时切换为\(landscape ? "横屏" : "竖屏")；手机可随时接管方向"
         if let locked = await foregroundAppFixedOrientation() {
             let lockedLabel = locked == "portrait" ? "竖屏" : "横屏"
             let lockedLandscape = locked == "landscape"
@@ -590,6 +754,7 @@ final class MirrorSession: ObservableObject {
                 try? await Task.sleep(nanoseconds: 550_000_000)
                 guard let self, !Task.isCancelled else { return }
                 guard self.isRunning, !self.isStarting, !self.isTransitioning else { continue }
+                await self.checkPhoneRotationOverride()
                 guard let size = await self.currentRotationSize() else { continue }
                 let landscape = size.width > size.height
                 guard landscape != self.orientationLandscape else { continue }
@@ -866,72 +1031,40 @@ final class MirrorSession: ObservableObject {
     }
 
     private func restoreRotationIfNeeded() {
-        let original = originalRotation
-        let mustForcePortrait = didChangeOrientation || orientationLandscape
-        self.originalRotation = nil
+        rotationReleaseTask?.cancel()
+        rotationReleaseTask = nil
+        softwareRotationActive = false
+        softwareRotationTarget = nil
+        lastRotationPolicyCheck = .distantPast
         didChangeOrientation = false
 
-        guard let original else {
-            if mustForcePortrait { forcePortraitSync() }
-            return
-        }
-        let user = original.userRotation
-        let fixed = original.fixedRotation
-
-        if mustForcePortrait {
-            // A physical rotation never had an "original" portrait state to
-            // capture (the display was already landscape when we noticed it),
-            // and a captured landscape state may itself be stale. Do not put
-            // the phone back into landscape: the lock screen only draws a
-            // cropped landscape strip on several MIUI builds, so the user
-            // cannot unlock it. Always finish in portrait and keep the panel
-            // awake long enough for the lock screen to redraw.
-            forcePortraitSync()
+        // Respect the phone's current auto-rotate switch, but always end in
+        // portrait so the mirrored resolution returns to the normal vertical
+        // size after stopping. The fixed flag is never restored: it is what
+        // breaks third-party fullscreen on this device.
+        let currentAccel = adbShellOutputSync("settings get system accelerometer_rotation")
+        let auto = currentAccel ?? originalAccelerometerRotation ?? "1"
+        // On this Xiaomi, wm user-rotation alone does not change the panel.
+        // Enable fixed only for this short portrait transition, then release
+        // it unconditionally.
+        adbShellSync("wm fixed-to-user-rotation enabled")
+        adbShellSync("wm user-rotation lock 0")
+        adbShellSync("settings put system user_rotation 0")
+        adbShellSync("settings put system accelerometer_rotation 0")
+        Thread.sleep(forTimeInterval: 0.35)
+        adbShellSync("wm fixed-to-user-rotation disabled")
+        if auto == "1" {
+            adbShellSync("wm user-rotation free")
+            adbShellSync("settings put system accelerometer_rotation 1")
         } else {
-            // Restore synchronously: the app can be terminating right after
-            // stop(), and a detached Task would be cancelled before adb runs.
-            if user.hasPrefix("lock") {
-                adbShellSync("wm user-rotation \(user)")
-            } else {
-                adbShellSync("wm user-rotation free")
-            }
-            if ["enabled", "disabled", "default"].contains(fixed) {
-                adbShellSync("wm fixed-to-user-rotation \(fixed)")
-            } else {
-                adbShellSync("wm fixed-to-user-rotation default")
-            }
-            if let userSetting = originalUserRotationSetting {
-                adbShellSync("settings put system user_rotation \(userSetting)")
-            }
-            if let accelerometer = originalAccelerometerRotation {
-                adbShellSync("settings put system accelerometer_rotation \(accelerometer)")
-            }
-            AppLog.write("rotation restored user=\(user) fixed=\(fixed) accel=\(originalAccelerometerRotation ?? "nil") setting=\(originalUserRotationSetting ?? "nil")")
+            adbShellSync("wm user-rotation lock 0")
+            adbShellSync("settings put system accelerometer_rotation 0")
         }
+        AppLog.write("rotation restored portrait fixed=disabled auto=\(auto)")
+
+        originalRotation = nil
         originalAccelerometerRotation = nil
         originalUserRotationSetting = nil
-    }
-
-    /// Leave the phone in a guaranteed portrait, unlocked-display state after
-    /// a mirror-driven or physical landscape rotation. Legacy settings and the
-    /// wm lock are both written because OEM ROMs disagree about which one the
-    /// lock screen observes; the wm lock is written last and retried once.
-    private func forcePortraitSync() {
-        adbShellSync("input keyevent 224")
-        rotationRestoreCommand("settings put system accelerometer_rotation 0")
-        rotationRestoreCommand("settings put system user_rotation 0")
-        rotationRestoreCommand("wm fixed-to-user-rotation enabled")
-        rotationRestoreCommand("wm user-rotation lock 0")
-        AppLog.write("rotation forced portrait on stop")
-    }
-
-    @discardableResult
-    private func rotationRestoreCommand(_ command: String) -> Bool {
-        if adbShellSync(command) { return true }
-        Thread.sleep(forTimeInterval: 0.15)
-        let retried = adbShellSync(command)
-        AppLog.write("rotation restore retry cmd=\(command) ok=\(retried)")
-        return retried
     }
 
     @discardableResult
@@ -952,6 +1085,27 @@ final class MirrorSession: ObservableObject {
         return process.terminationStatus == 0
     }
 
+    private func adbShellOutputSync(_ command: String) -> String? {
+        guard let executable = adb.executableURL else { return nil }
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = executable
+        process.arguments = ["-s", serial, "shell", command]
+        process.environment = ADB.environment()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let text = String(data: data, encoding: .utf8)?.trimmed,
+              !text.isEmpty else { return nil }
+        return text
+    }
 
     func tap(_ normalized: CGPoint) {
         let point = devicePoint(normalized)
@@ -1047,6 +1201,12 @@ final class MirrorSession: ObservableObject {
             errorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    private func handleMouseButton(_ button: MouseButton) {
+        let action = settings.mouseMapping.action(for: button)
+        guard let code = action.androidKeyCode else { return }
+        sendKey(code)
     }
 
     private func handleKey(_ event: NSEvent) {

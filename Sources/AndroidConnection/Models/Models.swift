@@ -257,6 +257,93 @@ struct KeyChord: Codable, Hashable {
     }
 }
 
+enum MouseButtonAction: String, CaseIterable, Codable, Identifiable {
+    case back
+    case home
+    case recents
+    case none
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .back: return "返回"
+        case .home: return "主页"
+        case .recents: return "多任务"
+        case .none: return "无操作"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .back: return "chevron.backward"
+        case .home: return "house"
+        case .recents: return "square.on.square"
+        case .none: return "minus.circle"
+        }
+    }
+
+    var androidKeyCode: Int32? {
+        switch self {
+        case .back: return 4
+        case .home: return 3
+        case .recents: return 187
+        case .none: return nil
+        }
+    }
+}
+
+struct MouseMapping: Codable, Equatable {
+    var right: MouseButtonAction
+    var middle: MouseButtonAction
+
+    init(right: MouseButtonAction = .back, middle: MouseButtonAction = .recents) {
+        self.right = right
+        self.middle = middle
+    }
+
+    static var defaults: MouseMapping { MouseMapping() }
+
+    func action(for button: MouseButton) -> MouseButtonAction {
+        switch button {
+        case .right: return right
+        case .middle: return middle
+        }
+    }
+}
+
+enum MouseButton: String, CaseIterable, Identifiable {
+    case right
+    case middle
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .right: return "右键"
+        case .middle: return "中键"
+        }
+    }
+}
+
+enum MouseScrollDirection: String, CaseIterable, Codable, Identifiable {
+    case normal
+    case reverse
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .normal: return "正向"
+        case .reverse: return "反向"
+        }
+    }
+
+    var multiplier: CGFloat {
+        self == .normal ? 1 : -1
+    }
+}
+
 struct KeyboardMapping: Codable, Equatable {
     var bindings: [String: KeyChord]
 

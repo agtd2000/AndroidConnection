@@ -48,12 +48,14 @@ struct MirrorView: View {
         .onChange(of: model.settings.audioForwarding) { enabled in
             if session.isRunning { session.setAudioEnabled(enabled) }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
+            guard let window = note.object as? NSWindow, window === mirrorWindow else { return }
             guard ui.fullscreen else { return }
             ui.fullscreen = false
             model.mirrorFullscreen = false
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { note in
+            guard let window = note.object as? NSWindow, window === mirrorWindow else { return }
             guard model.section == .mirror else { return }
             ui.fullscreen = true
             model.mirrorFullscreen = true
@@ -280,13 +282,19 @@ struct MirrorView: View {
     private func toggleFullscreen() {
         ui.fullscreen.toggle()
         model.mirrorFullscreen = ui.fullscreen
-        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+        guard let window = mirrorWindow else { return }
+        // `keyWindow` can be a transient tooltip or popup. Toggle the real
+        // document window so the desktop fullscreen state follows this flag.
+        let nativeFullscreen = window.styleMask.contains(.fullScreen)
+        if nativeFullscreen != ui.fullscreen {
             window.toggleFullScreen(nil)
         }
     }
 
     private var mirrorWindow: NSWindow? {
-        NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first { $0.isVisible && $0.contentView != nil }
+        NSApp.windows.first {
+            $0.isVisible && $0.title == "AndroidConnection" && $0.contentView != nil
+        } ?? NSApp.mainWindow ?? NSApp.keyWindow
     }
 
     private func toggleMini() {

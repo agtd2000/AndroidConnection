@@ -17,9 +17,6 @@ final class SettingsStore: ObservableObject {
     @Published var hideDotFiles: Bool {
         didSet { defaults.set(hideDotFiles, forKey: Keys.hideDotFiles) }
     }
-    @Published var keepScreenAwake: Bool {
-        didSet { defaults.set(keepScreenAwake, forKey: Keys.keepAwake) }
-    }
     @Published var audioForwarding: Bool {
         didSet { defaults.set(audioForwarding, forKey: Keys.audioForwarding) }
     }
@@ -45,6 +42,16 @@ final class SettingsStore: ObservableObject {
             }
         }
     }
+    @Published var mouseMapping: MouseMapping {
+        didSet {
+            if let data = try? JSONEncoder().encode(mouseMapping) {
+                defaults.set(data, forKey: Keys.mouseMapping)
+            }
+        }
+    }
+    @Published var scrollDirection: MouseScrollDirection {
+        didSet { defaults.set(scrollDirection.rawValue, forKey: Keys.scrollDirection) }
+    }
     @Published var downloadFolder: String {
         didSet { defaults.set(downloadFolder, forKey: Keys.downloadFolder) }
     }
@@ -60,13 +67,14 @@ final class SettingsStore: ObservableObject {
         static let autoConnect = "wifi.autoConnect"
         static let hideDSStore = "files.hideDSStore"
         static let hideDotFiles = "files.hideDotFiles"
-        static let keepAwake = "mirror.keepAwake"
         static let audioForwarding = "mirror.audioForwarding"
         static let autoScreenOff = "mirror.autoScreenOff"
         static let connectionPreference = "connection.preference"
         static let adbPort = "connection.adbPort"
         static let syncDeviceClipboard = "clipboard.syncFromDevice"
         static let keyboardMapping = "input.keyboardMapping"
+        static let mouseMapping = "input.mouseMapping"
+        static let scrollDirection = "input.mouseScrollDirection"
         static let downloadFolder = "files.downloadFolder"
         static let savedDevices = "wifi.savedDevices"
     }
@@ -78,7 +86,6 @@ final class SettingsStore: ObservableObject {
         autoConnect = defaults.object(forKey: Keys.autoConnect) as? Bool ?? true
         hideDSStore = defaults.object(forKey: Keys.hideDSStore) as? Bool ?? true
         hideDotFiles = defaults.object(forKey: Keys.hideDotFiles) as? Bool ?? false
-        keepScreenAwake = defaults.object(forKey: Keys.keepAwake) as? Bool ?? true
         audioForwarding = defaults.object(forKey: Keys.audioForwarding) as? Bool ?? true
         autoScreenOff = defaults.object(forKey: Keys.autoScreenOff) as? Bool ?? true
         connectionPreference = ConnectionPreference(rawValue: defaults.string(forKey: Keys.connectionPreference) ?? "") ?? .auto
@@ -91,6 +98,13 @@ final class SettingsStore: ObservableObject {
         } else {
             keyboardMapping = .defaults
         }
+        if let data = defaults.data(forKey: Keys.mouseMapping),
+           let decoded = try? JSONDecoder().decode(MouseMapping.self, from: data) {
+            mouseMapping = decoded
+        } else {
+            mouseMapping = .defaults
+        }
+        scrollDirection = MouseScrollDirection(rawValue: defaults.string(forKey: Keys.scrollDirection) ?? "") ?? .normal
         downloadFolder = defaults.string(forKey: Keys.downloadFolder) ?? SettingsStore.defaultDownloadFolder
         if let data = defaults.data(forKey: Keys.savedDevices),
            let decoded = try? JSONDecoder().decode([SavedWirelessDevice].self, from: data) {

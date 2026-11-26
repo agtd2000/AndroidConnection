@@ -45,10 +45,13 @@
 - scrcpy 视频通道（H.264），VideoToolbox 解码，CALayer 渲染；不受 `screenrecord` 180 秒限制
 - 点击、拖动映射触控；点击按物理屏幕坐标换算，避开 scrcpy 虚拟显示，桌面图标可正常打开
 - Mac 键盘输入映射 Android 按键/文本；设置中可录制自定义键位
+- 鼠标控制：左键点击/拖动触控，右键返回，中键打开多任务；右键、中键动作和滚轮正反向均可在设置中修改
 - 内置中文 / emoji 输入框：通过控制通道写入并粘贴到手机焦点输入框
 - 画质与码率可调，修改后只重启画面，音频不断流；投屏可横竖屏切换并自动适配分辨率
 - **设备音频转发**：48 kHz 立体声 16-bit PCM，`AVAudioSourceNode` 按硬件时钟拉流，界面带电平指示
 - 截图、全屏与 **Mini 紧凑窗口**（只保留投屏画面，鼠标移入时浮出控制条）、断流自动重连（最多 5 次）
+- 横竖屏优先跟随手机：自动旋转/陀螺仪或前台 App 的 `requestedOrientation` 决定方向；全屏不再强制手机横屏。手机锁定方向时可用工具栏临时旋转（8 秒后自动交还，手机改变方向设置时立即交还）
+- 停止投屏、退出全屏或退出应用时解除临时方向锁定并恢复手机原旋转设置，避免分辨率残留和视频 App 全屏失效
 - 投屏成功 3 秒后检测手机屏幕并自动执行一次关闭；也可随时手动恢复或再次熄屏。物理熄屏使用视频控制通道 `powerMode=Off`，画面与触控继续
 - 适配 720×1600、1080×2400、1440×3200 等竖屏设备
 
@@ -62,7 +65,7 @@
 
 - 连接优先级（USB / Wi‑Fi / 自动）、ADB 默认与备用端口
 - 手机剪贴板自动同步开关、下载目录、隐藏文件策略、`.DS_Store` 清理
-- 投屏画质/码率/常亮、**投屏后自动关闭手机屏幕**、**手动物理熄屏**、**音频转发开关**、**可录制键盘映射**、无线自动重连
+- 投屏画质/码率、**投屏时自动关闭手机屏幕（关闭则保持常亮）**、**手动物理熄屏**、**音频转发开关**、**可录制键盘映射**、**鼠标按键映射与滚轮方向**、无线自动重连
 - 视频/音频管线诊断、ADB 版本、架构、一键重启 ADB
 
 ## 音频转发说明
@@ -201,7 +204,7 @@ Sources/AndroidConnection/
 - `ADB.swift`：`Process` 封装内置 adb，统一超时、端口、输出解析；`ADBStream` 处理长驻 stdout
 - `H264StreamDecoder.swift`：Annex-B SPS/PPS → `VTDecompressionSession` → `CVPixelBuffer`
 - `ScrcpyVideo.swift`：`video=true control=true` 的 scrcpy 服务端；`send_stream_meta=false` 输出 Annex-B H.264
-- `MirrorSession.swift`：画面/音频独立启停，切码率只重启画面；旋转通过 `wm user-rotation` 并带一次自动重试；自动护屏走亮度 0，手动熄屏走视频控制消息，停止/退出时恢复
+- `MirrorSession.swift`：画面/音频独立启停，切码率只重启画面；手动旋转仅在数秒内临时覆盖方向，手机改变自动旋转/方向设置或超时后立即交还；`fixed-to-user-rotation` 只在临时旋转和退出竖屏校正期间短暂启用并必定解除；停止/退出时恢复竖屏并刷新分辨率
 - `AudioForwarder.swift`：scrcpy 服务端 raw PCM + `adb forward` + AVAudioEngine
 - `ScrcpyControl.swift`：独立 control-only scrcpy 服务端；`GET_CLIPBOARD` / `SET_CLIPBOARD`，UTF‑8 中文与 emoji
 - 输入注入：`adb shell input tap/swipe/keyevent/text`；Unicode 文本走控制通道粘贴
