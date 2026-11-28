@@ -14,6 +14,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // rotation. Disable that restore and center the main window once.
             window.setFrameAutosaveName("")
             window.isRestorable = false
+            if let screen = window.screen ?? NSScreen.main {
+                // Keep the initial main window around 80% of the usable
+                // display height, while leaving room for the menu bar/Dock.
+                var frame = window.frame
+                let target = max(680, screen.visibleFrame.height * 0.8)
+                frame.size.height = min(target, screen.visibleFrame.height - 24)
+                frame.size.width = max(frame.size.width, 1020)
+                window.setFrame(frame, display: true)
+            }
             window.center()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -293,13 +302,18 @@ struct AndroidConnectionApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 
+    private static var defaultWindowHeight: CGFloat {
+        let visible = NSScreen.main?.visibleFrame.height ?? 900
+        return max(680, visible * 0.8)
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(model)
                 .environmentObject(model.devices)
         }
-        .defaultSize(width: 1180, height: 780)
+        .defaultSize(width: 1180, height: AndroidConnectionApp.defaultWindowHeight)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) {}

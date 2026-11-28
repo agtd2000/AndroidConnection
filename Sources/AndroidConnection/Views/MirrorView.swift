@@ -29,6 +29,7 @@ struct MirrorView: View {
                     } else {
                         inputBar
                         controlBar
+                        actionBar
                         footer
                     }
                 }
@@ -426,65 +427,6 @@ struct MirrorView: View {
             .frame(width: 108)
             .help("视频码率")
 
-            Button {
-                model.settings.audioForwarding.toggle()
-            } label: {
-                Label(
-                    session.isRunning && session.audioEnabled ? "音频开" : "音频",
-                    systemImage: session.isRunning && session.audioEnabled ? "speaker.wave.2.fill" : "speaker.slash"
-                )
-            }
-            .buttonStyle(SecondaryButtonStyle())
-            .help(session.isRunning ? session.audioStatus : "是否在投屏时转发手机声音")
-
-            Button {
-                Task {
-                    if let url = await session.screenshot() {
-                        ui.toast = "截图已保存：\(url.lastPathComponent)"
-                    } else {
-                        ui.toast = session.errorMessage ?? "截图失败"
-                    }
-                }
-            } label: {
-                Label("截图", systemImage: "camera")
-            }
-            .buttonStyle(SecondaryButtonStyle())
-            .disabled(!session.isRunning)
-
-            Button {
-                toggleMini()
-            } label: {
-                Label("Mini", systemImage: "rectangle.compress.vertical")
-            }
-            .buttonStyle(SecondaryButtonStyle())
-            .help("只显示投屏画面；控制条固定在窗口底部状态栏")
-
-            Button {
-                toggleFullscreen()
-            } label: {
-                Label(ui.fullscreen ? "退出全屏" : "全屏",
-                      systemImage: ui.fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-            }
-            .buttonStyle(SecondaryButtonStyle())
-
-            if session.isRunning {
-                Button {
-                    session.stop()
-                } label: {
-                    Label("停止", systemImage: "stop.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.danger)
-            } else {
-                Button {
-                    Task { await session.start() }
-                } label: {
-                    Label("开始投屏", systemImage: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .disabled(session.isStarting)
-            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
@@ -519,37 +461,108 @@ struct MirrorView: View {
 
     private var controlBar: some View {
         HStack(spacing: 8) {
-            controlButton("chevron.backward", "返回", width: 60) { session.sendKey(4) }
-            controlButton("house", "主页", width: 60) { session.sendKey(3) }
-            controlButton("square.on.square", "多任务", width: 60) { session.sendKey(187) }
-            Divider().frame(height: 18)
-            controlOrientationButton()
-            controlButton(
-                session.displayPoweredOff ? "sun.max" : "display",
-                session.displayPoweredOff ? "恢复手机屏幕" : (session.screenOff ? "物理关闭手机屏幕" : "关闭手机屏幕")
-            ) {
-                session.toggleScreen()
+            // Phone navigation and media keys.
+            HStack(spacing: 8) {
+                controlButton("chevron.backward", "返回", width: 60) { session.sendKey(4) }
+                controlButton("house", "主页", width: 60) { session.sendKey(3) }
+                controlButton("square.on.square", "多任务", width: 60) { session.sendKey(187) }
+                Divider().frame(height: 18)
+                controlOrientationButton()
+                controlButton(
+                    session.displayPoweredOff ? "sun.max" : "display",
+                    session.displayPoweredOff ? "恢复手机屏幕" : (session.screenOff ? "物理关闭手机屏幕" : "关闭手机屏幕")
+                ) {
+                    session.toggleScreen()
+                }
+                Divider().frame(height: 18)
+                controlButton("speaker.slash.fill", "静音") { session.sendKey(164) }
+                controlButton("speaker.wave.1", "音量 -") { session.sendKey(25) }
+                controlButton("speaker.wave.3", "音量 +") { session.sendKey(24) }
+                controlButton("power", "电源键") { session.sendKey(26) }
+                Divider().frame(height: 18)
+                controlButton("camera", "截图") {
+                    Task {
+                        if let url = await session.screenshot() {
+                            ui.toast = "截图已保存：\(url.lastPathComponent)"
+                        } else {
+                            ui.toast = session.errorMessage ?? "截图失败"
+                        }
+                    }
+                }
             }
-            Divider().frame(height: 18)
-            controlButton("speaker.slash.fill", "静音") { session.sendKey(164) }
-            controlButton("speaker.wave.1", "音量 -") { session.sendKey(25) }
-            controlButton("speaker.wave.3", "音量 +") { session.sendKey(24) }
-            controlButton("power", "电源键") { session.sendKey(26) }
-            Divider().frame(height: 18)
-            controlButton("camera", "截图") {
-                Task { _ = await session.screenshot() }
-            }
+            .disabled(!session.isRunning)
+            .opacity(session.isRunning ? 1 : 0.5)
 
-            Spacer()
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 8)
+    }
+
+    /// Bottom action row: audio, window mode and session actions live here so
+    /// they do not compete for space with the phone navigation keys.
+    private var actionBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                model.settings.audioForwarding.toggle()
+            } label: {
+                Label(
+                    session.isRunning && session.audioEnabled ? "音频开" : "音频转发",
+                    systemImage: session.isRunning && session.audioEnabled ? "speaker.wave.2.fill" : "speaker.slash"
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(session.isRunning ? session.audioStatus : "是否在投屏时转发手机声音")
+
+            Spacer(minLength: 8)
 
             Text("\(session.frameCount) 帧")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tertiary)
+            Divider().frame(height: 18)
+
+            Button {
+                toggleMini()
+            } label: {
+                Label("Mini 窗口", systemImage: "rectangle.compress.vertical")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("只显示投屏画面；控制条固定在窗口底部状态栏")
+
+            Button {
+                toggleFullscreen()
+            } label: {
+                Label(ui.fullscreen ? "退出全屏" : "全屏",
+                      systemImage: ui.fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            if session.isRunning {
+                Button {
+                    session.stop()
+                } label: {
+                    Label("退出投屏", systemImage: "stop.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(Theme.danger)
+            } else {
+                Button {
+                    Task { await session.start() }
+                } label: {
+                    Label("开始投屏", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(Theme.accent)
+                .disabled(session.isStarting)
+            }
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 10)
-        .disabled(!session.isRunning)
-        .opacity(session.isRunning ? 1 : 0.5)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder
