@@ -155,17 +155,17 @@ struct DashboardView: View {
     }
 
     private var quickActions: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], spacing: 12) {
-            QuickActionTile(icon: "folder.fill", title: "文件管理", subtitle: "浏览、上传、下载与预览", tint: Theme.accent) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 10)], spacing: 10) {
+            QuickActionTile(icon: "folder.fill", title: "文件管理", tint: Theme.accent) {
                 model.choose(.files)
             }
-            QuickActionTile(icon: "rectangle.on.rectangle.fill", title: "屏幕投屏", subtitle: "实时画面与触控操作", tint: Theme.accentDeep) {
+            QuickActionTile(icon: "rectangle.on.rectangle.fill", title: "屏幕投屏", tint: Theme.accentDeep) {
                 model.startMirror()
             }
-            QuickActionTile(icon: "shippingbox.fill", title: "安装应用", subtitle: "选择 APK 一键安装", tint: Color(red: 0.55, green: 0.42, blue: 0.85)) {
+            QuickActionTile(icon: "shippingbox.fill", title: "安装应用", tint: Color(red: 0.55, green: 0.42, blue: 0.85)) {
                 installAPK()
             }
-            QuickActionTile(icon: "doc.on.clipboard.fill", title: "剪贴板与链接", subtitle: "在两端之间接力文本", tint: Color(red: 0.90, green: 0.52, blue: 0.24)) {
+            QuickActionTile(icon: "doc.on.clipboard.fill", title: "剪贴板与链接", tint: Color(red: 0.90, green: 0.52, blue: 0.24)) {
                 model.choose(.clipboard)
             }
         }
@@ -470,7 +470,6 @@ private struct BatteryDetailRow: View {
 struct QuickActionTile: View {
     let icon: String
     let title: String
-    let subtitle: String
     let tint: Color
     let action: () -> Void
 
@@ -478,29 +477,22 @@ struct QuickActionTile: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                IconBubble(icon: icon, tint: tint, size: 40)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            HStack(spacing: 9) {
+                IconBubble(icon: icon, tint: tint, size: 32)
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
             }
-            .padding(13)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .strokeBorder(hover.isHovered ? tint.opacity(0.35) : Color.primary.opacity(0.06), lineWidth: 1)
             )
             .contentShape(Rectangle())

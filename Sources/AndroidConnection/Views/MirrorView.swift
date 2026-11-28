@@ -29,7 +29,6 @@ struct MirrorView: View {
                     } else {
                         inputBar
                         controlBar
-                        actionBar
                         footer
                     }
                 }
@@ -459,10 +458,11 @@ struct MirrorView: View {
         ui.textInput = ""
     }
 
+    /// Single bottom toolbar: phone controls, screenshot, audio forwarding,
+    /// window modes and the session action all sit in one row.
     private var controlBar: some View {
-        HStack(spacing: 8) {
-            // Phone navigation and media keys.
-            HStack(spacing: 8) {
+        HStack(spacing: 7) {
+            HStack(spacing: 7) {
                 controlButton("chevron.backward", "返回", width: 60) { session.sendKey(4) }
                 controlButton("house", "主页", width: 60) { session.sendKey(3) }
                 controlButton("square.on.square", "多任务", width: 60) { session.sendKey(187) }
@@ -493,76 +493,62 @@ struct MirrorView: View {
             .disabled(!session.isRunning)
             .opacity(session.isRunning ? 1 : 0.5)
 
-            Spacer(minLength: 8)
+            Divider().frame(height: 18)
+            audioForwardButton
+            controlButton("rectangle.compress.vertical", "Mini 窗口") { toggleMini() }
+            controlButton(
+                ui.fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                ui.fullscreen ? "退出全屏" : "全屏"
+            ) { toggleFullscreen() }
+            sessionActionButton
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 8)
     }
 
-    /// Bottom action row: audio, window mode and session actions live here so
-    /// they do not compete for space with the phone navigation keys.
-    private var actionBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                model.settings.audioForwarding.toggle()
-            } label: {
-                Label(
-                    session.isRunning && session.audioEnabled ? "音频开" : "音频转发",
-                    systemImage: session.isRunning && session.audioEnabled ? "speaker.wave.2.fill" : "speaker.slash"
-                )
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help(session.isRunning ? session.audioStatus : "是否在投屏时转发手机声音")
-
-            Spacer(minLength: 8)
-
-            Text("\(session.frameCount) 帧")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
-            Divider().frame(height: 18)
-
-            Button {
-                toggleMini()
-            } label: {
-                Label("Mini 窗口", systemImage: "rectangle.compress.vertical")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("只显示投屏画面；控制条固定在窗口底部状态栏")
-
-            Button {
-                toggleFullscreen()
-            } label: {
-                Label(ui.fullscreen ? "退出全屏" : "全屏",
-                      systemImage: ui.fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            if session.isRunning {
-                Button {
-                    session.stop()
-                } label: {
-                    Label("退出投屏", systemImage: "stop.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(Theme.danger)
-            } else {
-                Button {
-                    Task { await session.start() }
-                } label: {
-                    Label("开始投屏", systemImage: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(Theme.accent)
-                .disabled(session.isStarting)
-            }
+    /// Waveform rather than a speaker so this cannot be confused with the
+    /// adjacent volume controls. Active forwarding is highlighted in accent.
+    private var audioForwardButton: some View {
+        Button {
+            model.settings.audioForwarding.toggle()
+        } label: {
+            Image(systemName: "waveform")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(session.audioEnabled ? Theme.accent : Color.secondary)
+                .frame(width: 30, height: 26)
+                .contentShape(Rectangle())
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 10)
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(session.audioEnabled ? Theme.accent.opacity(0.14) : Color.primary.opacity(0.06))
+        )
+        .help(session.isRunning ? session.audioStatus : "是否在投屏时转发手机声音")
+    }
+
+    private var sessionActionButton: some View {
+        Button {
+            if session.isRunning {
+                session.stop()
+            } else {
+                Task { await session.start() }
+            }
+        } label: {
+            Image(systemName: session.isRunning ? "stop.fill" : "play.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(width: 30, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(session.isRunning ? Theme.danger : Theme.accent)
+        )
+        .help(session.isRunning ? "退出投屏" : "开始投屏")
+        .disabled(session.isStarting)
     }
 
     @ViewBuilder

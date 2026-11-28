@@ -3,7 +3,7 @@ import AppKit
 
 enum AppInfo {
     static let name = "AndroidConnection"
-    static let version = "1.2.23"
+    static let version = "1.2.24"
     static let build = "1"
     static let scrcpyServerVersion = "5.0.1"
 }
