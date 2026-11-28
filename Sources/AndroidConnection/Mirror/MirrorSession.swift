@@ -1225,14 +1225,8 @@ final class MirrorSession: ObservableObject {
             sendKey(67); return
         case 53:
             sendKey(4); return
-        case 126:
-            sendKey(19); return
-        case 125:
-            sendKey(20); return
-        case 123:
-            sendKey(21); return
-        case 124:
-            sendKey(22); return
+        case 126, 125, 123, 124:
+            handleArrowKey(event.keyCode); return
         case 48:
             sendKey(61); return
         case 115:
@@ -1256,6 +1250,85 @@ final class MirrorSession: ObservableObject {
                 sendText(String(scalar))
             }
         }
+    }
+
+    /// Arrow keys work as DPAD on the launcher, but most third-party apps do
+    /// not implement DPAD focus navigation. When enabled, detect the current
+    /// foreground package and turn the arrows into directional swipes inside
+    /// apps while preserving DPAD navigation on the launcher.
+    private func handleArrowKey(_ keyCode: UInt16) {
+        let dpad: Int32
+        switch keyCode {
+        case 126: dpad = 19
+        case 125: dpad = 20
+        case 123: dpad = 21
+        default: dpad = 22
+        }
+        guard settings.arrowKeysSwipeInApps else {
+            sendKey(dpad)
+            return
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let package = await self.foregroundPackageName(),
+                  !Self.isLauncherPackage(package) else {
+                self.sendKey(dpad)
+                return
+            }
+            self.sendArrowSwipe(keyCode)
+        }
+    }
+
+    private func foregroundPackageName() async -> String? {
+        // `mCurrentFocus` is null while scrcpy holds the display power off,
+        // even though a normal app is resumed. The activity task is the
+        // reliable source for choosing DPAD vs. swipe.
+        let commands = [
+            "dumpsys activity activities | grep -m1 -E 'mResumedActivity|topResumedActivity'",
+            "dumpsys window | grep -m1 mCurrentFocus"
+        ]
+        for command in commands {
+            guard let result = try? await adb.shell(command, serial: serial, timeout: 8),
+                  result.succeeded else { continue }
+            let token = result.output
+                .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+                .first { $0.contains("/") && !$0.contains("{") }
+            if let token, let package = token.split(separator: "/").first, !package.isEmpty {
+                return String(package)
+            }
+        }
+        return nil
+    }
+
+    private static func isLauncherPackage(_ package: String) -> Bool {
+        let value = package.lowercased()
+        return value == "com.miui.home"
+            || value.contains("launcher")
+            || value.hasSuffix(".home")
+    }
+
+    private func sendArrowSwipe(_ keyCode: UInt16) {
+        let center = CGPoint(x: 0.5, y: 0.5)
+        let reach: CGFloat = 0.18
+        let from: CGPoint
+        let to: CGPoint
+        // The gesture follows the content: pressing Down scrolls toward the
+        // end of the list, so the finger travels up the screen.
+        switch keyCode {
+        case 126:
+            from = CGPoint(x: center.x, y: center.y - reach)
+            to = CGPoint(x: center.x, y: center.y + reach)
+        case 125:
+            from = CGPoint(x: center.x, y: center.y + reach)
+            to = CGPoint(x: center.x, y: center.y - reach)
+        case 123:
+            from = CGPoint(x: center.x - reach, y: center.y)
+            to = CGPoint(x: center.x + reach, y: center.y)
+        default:
+            from = CGPoint(x: center.x + reach, y: center.y)
+            to = CGPoint(x: center.x - reach, y: center.y)
+        }
+        swipe(from: from, to: to)
     }
 
     /// Physical display size used by `adb shell input`.

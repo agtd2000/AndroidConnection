@@ -14,6 +14,7 @@ final class MirrorPlayerView: NSView {
     private var pressPoint: CGPoint?
     private var scrollAccumulator: CGFloat = 0
     private var mouseMonitor: Any?
+    private var keyMonitor: Any?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -32,7 +33,7 @@ final class MirrorPlayerView: NSView {
     }
 
     deinit {
-        removeMouseMonitor()
+        removeEventMonitors()
     }
 
     override var isFlipped: Bool { true }
@@ -40,7 +41,7 @@ final class MirrorPlayerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        removeMouseMonitor()
+        removeEventMonitors()
         guard window != nil else { return }
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .otherMouseDown]) { [weak self] event in
             guard let self, event.window === self.window else { return event }
@@ -59,12 +60,34 @@ final class MirrorPlayerView: NSView {
             }
             return event
         }
+
+        // Arrow keys must keep working after clicking a phone app icon: the
+        // SwiftUI hierarchy can move first-responder status to another view,
+        // and Android apps frequently do not handle DPAD focus themselves.
+        // Catch only the four arrow keys at window level; leave text editors
+        // (including the mirror's text input field) untouched.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.window === self.window,
+                  self.window?.isKeyWindow == true else { return event }
+            guard [123, 124, 125, 126].contains(event.keyCode) else { return event }
+            let responder = self.window?.firstResponder
+            if responder is NSTextView || responder is NSTextField {
+                return event
+            }
+            self.onKeyDown?(event)
+            return nil
+        }
     }
 
-    private func removeMouseMonitor() {
+    private func removeEventMonitors() {
         if let mouseMonitor {
             NSEvent.removeMonitor(mouseMonitor)
             self.mouseMonitor = nil
+        }
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
         }
     }
 

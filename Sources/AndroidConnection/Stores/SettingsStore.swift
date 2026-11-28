@@ -23,6 +23,9 @@ final class SettingsStore: ObservableObject {
     @Published var autoScreenOff: Bool {
         didSet { defaults.set(autoScreenOff, forKey: Keys.autoScreenOff) }
     }
+    @Published var miniBarOpacity: Double {
+        didSet { defaults.set(miniBarOpacity, forKey: Keys.miniBarOpacity) }
+    }
     @Published var connectionPreference: ConnectionPreference {
         didSet { defaults.set(connectionPreference.rawValue, forKey: Keys.connectionPreference) }
     }
@@ -52,6 +55,9 @@ final class SettingsStore: ObservableObject {
     @Published var scrollDirection: MouseScrollDirection {
         didSet { defaults.set(scrollDirection.rawValue, forKey: Keys.scrollDirection) }
     }
+    @Published var arrowKeysSwipeInApps: Bool {
+        didSet { defaults.set(arrowKeysSwipeInApps, forKey: Keys.arrowKeysSwipeInApps) }
+    }
     @Published var downloadFolder: String {
         didSet { defaults.set(downloadFolder, forKey: Keys.downloadFolder) }
     }
@@ -69,12 +75,14 @@ final class SettingsStore: ObservableObject {
         static let hideDotFiles = "files.hideDotFiles"
         static let audioForwarding = "mirror.audioForwarding"
         static let autoScreenOff = "mirror.autoScreenOff"
+        static let miniBarOpacity = "mirror.miniBarOpacity"
         static let connectionPreference = "connection.preference"
         static let adbPort = "connection.adbPort"
         static let syncDeviceClipboard = "clipboard.syncFromDevice"
         static let keyboardMapping = "input.keyboardMapping"
         static let mouseMapping = "input.mouseMapping"
         static let scrollDirection = "input.mouseScrollDirection"
+        static let arrowKeysSwipeInApps = "input.arrowKeysSwipeInApps"
         static let downloadFolder = "files.downloadFolder"
         static let savedDevices = "wifi.savedDevices"
     }
@@ -88,6 +96,7 @@ final class SettingsStore: ObservableObject {
         hideDotFiles = defaults.object(forKey: Keys.hideDotFiles) as? Bool ?? false
         audioForwarding = defaults.object(forKey: Keys.audioForwarding) as? Bool ?? true
         autoScreenOff = defaults.object(forKey: Keys.autoScreenOff) as? Bool ?? true
+        miniBarOpacity = min(0.95, max(0.15, defaults.object(forKey: Keys.miniBarOpacity) as? Double ?? 0.55))
         connectionPreference = ConnectionPreference(rawValue: defaults.string(forKey: Keys.connectionPreference) ?? "") ?? .auto
         let savedPort = defaults.object(forKey: Keys.adbPort) as? Int
         adbPort = savedPort ?? Int(ADB.serverPort) ?? 5037
@@ -105,6 +114,7 @@ final class SettingsStore: ObservableObject {
             mouseMapping = .defaults
         }
         scrollDirection = MouseScrollDirection(rawValue: defaults.string(forKey: Keys.scrollDirection) ?? "") ?? .normal
+        arrowKeysSwipeInApps = defaults.object(forKey: Keys.arrowKeysSwipeInApps) as? Bool ?? true
         downloadFolder = defaults.string(forKey: Keys.downloadFolder) ?? SettingsStore.defaultDownloadFolder
         if let data = defaults.data(forKey: Keys.savedDevices),
            let decoded = try? JSONDecoder().decode([SavedWirelessDevice].self, from: data) {

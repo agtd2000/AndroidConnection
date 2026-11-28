@@ -24,21 +24,11 @@ struct MirrorView: View {
                 }
             }
 
-            if ui.mini && ui.hoverControls {
+            if ui.mini {
                 miniBar
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .background((ui.fullscreen || ui.mini) ? Color.black : Color(nsColor: .windowBackgroundColor))
-        .onHover { hovering in
-            guard ui.mini else {
-                ui.hoverControls = false
-                return
-            }
-            withAnimation(.easeInOut(duration: 0.14)) {
-                ui.hoverControls = hovering
-            }
-        }
         .onChange(of: model.settings.quality) { _ in
             if session.isRunning && !session.isTransitioning { Task { await session.restartVideoOnly() } }
         }
@@ -222,6 +212,13 @@ struct MirrorView: View {
     /// the complete window area.
     private var miniBar: some View {
         HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+                .frame(width: 20, height: 26)
+                .contentShape(Rectangle())
+                .help("拖动控制条任意位置可移动")
+            Divider().frame(height: 18).overlay(Color.white.opacity(0.15))
             fullscreenButton("chevron.backward", "返回", width: 60) { session.sendKey(4) }
             fullscreenButton("house", "主页", width: 60) { session.sendKey(3) }
             fullscreenButton("square.on.square", "多任务", width: 60) { session.sendKey(187) }
@@ -254,13 +251,41 @@ struct MirrorView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Color.black.opacity(0.82))
+                .fill(Color.black.opacity(model.settings.miniBarOpacity))
                 .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(Color.white.opacity(0.12)))
         )
         .padding(.horizontal, 14)
         .padding(.bottom, 14)
+        .offset(x: ui.miniBarOffset.width, y: ui.miniBarOffset.height)
+        .contentShape(Rectangle())
+        .simultaneousGesture(miniBarDragGesture)
         .disabled(!session.isRunning)
         .opacity(session.isRunning ? 1 : 0.55)
+    }
+
+    /// Drag the bar away from the bottom edge so it does not cover buttons
+    /// rendered near the bottom of the phone screen. The offset is kept in
+    /// `MirrorUIState` for the lifetime of this mirror view.
+    private var miniBarDragGesture: some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                if !ui.miniBarDragging {
+                    ui.miniBarDragStart = ui.miniBarOffset
+                    ui.miniBarDragging = true
+                    AppLog.write("mini drag start translation=\(value.translation) offset=\(ui.miniBarOffset)")
+                }
+                let x = ui.miniBarDragStart.width + value.translation.width
+                let y = ui.miniBarDragStart.height + value.translation.height
+                ui.miniBarOffset = CGSize(
+                    width: min(180, max(-180, x)),
+                    height: min(0, max(-260, y))
+                )
+            }
+            .onEnded { _ in
+                ui.miniBarDragging = false
+                ui.miniBarDragStart = ui.miniBarOffset
+                AppLog.write("mini drag end offset=\(ui.miniBarOffset)")
+            }
     }
 
     private func fullscreenButton(_ icon: String, _ help: String, width: CGFloat = 30, action: @escaping () -> Void) -> some View {
@@ -303,9 +328,7 @@ struct MirrorView: View {
         model.mirrorMini = ui.mini
         if ui.mini {
             enterMiniWindow()
-            withAnimation(.easeInOut(duration: 0.14)) { ui.hoverControls = true }
         } else {
-            withAnimation(.easeInOut(duration: 0.14)) { ui.hoverControls = false }
             leaveMiniWindow()
         }
     }
@@ -437,7 +460,7 @@ struct MirrorView: View {
                 Label("Mini", systemImage: "rectangle.compress.vertical")
             }
             .buttonStyle(SecondaryButtonStyle())
-            .help("只显示投屏画面；鼠标移入画面显示控制条")
+            .help("只显示投屏画面；控制条可调透明度并可拖动")
 
             Button {
                 toggleFullscreen()
@@ -639,7 +662,9 @@ final class MirrorUIState: ObservableObject {
     @Published var toast: String?
     @Published var fullscreen = false
     @Published var mini = false
-    @Published var hoverControls = false
     @Published var savedWindowFrame: NSRect?
     @Published var textInput = ""
+    @Published var miniBarOffset: CGSize = .zero
+    @Published var miniBarDragStart: CGSize = .zero
+    @Published var miniBarDragging = false
 }

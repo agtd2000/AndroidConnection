@@ -3,7 +3,7 @@ import AppKit
 
 enum AppInfo {
     static let name = "AndroidConnection"
-    static let version = "1.2.19"
+    static let version = "1.2.20"
     static let build = "1"
     static let scrcpyServerVersion = "5.0.1"
 }
@@ -76,6 +76,12 @@ struct KeyboardMappingEditor: View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: "键盘映射", subtitle: "投屏时用 Mac 键盘操控手机")
             Text("点击“录制”后按下组合键即可绑定。绑定只在投屏画面获得焦点时生效；方向键、回车、退格等未绑定按键仍按默认方式输入。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            Toggle("方向键在 App 内模拟滑动", isOn: $settings.arrowKeysSwipeInApps)
+                .help("桌面使用方向键导航；第三方 App 通常不响应方向键，开启后自动改为上/下/左/右滑动")
+            Text("开启后，检测到当前不是桌面时，上下左右键会改为发送滑动；桌面仍使用方向键移动焦点。自定义键盘映射优先于该行为。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
@@ -213,6 +219,19 @@ struct SettingsContent: View {
             }
             Toggle("转发手机播放声音到 Mac", isOn: $settings.audioForwarding)
             Toggle("投屏时关闭手机屏幕（关闭则保持常亮）", isOn: $settings.autoScreenOff)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Mini 控制条背景不透明度")
+                    Spacer()
+                    Text("\(Int(settings.miniBarOpacity * 100))%")
+                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $settings.miniBarOpacity, in: 0.15...0.95, step: 0.05)
+                Text("数值越低越透明，避免完全遮挡手机屏幕。Mini 模式下拖动控制条左侧的手柄，可将它向上或向两侧移开。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             Text("开启后投屏 3 秒自动熄灭手机物理屏幕；关闭后保持手机屏幕常亮并阻止自动锁屏。两种状态都只影响手机屏幕，投屏画面、点击和键盘操作始终可用。优先通过 scrcpy 控制通道关闭显示电源，物理屏幕熄灭但 SurfaceFlinger 继续合成；若控制通道不可用，则回退到最低亮度。音频捕获需要 Android 13 或更高版本。画质与码率修改只重启画面，不会打断音频。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
