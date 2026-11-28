@@ -166,7 +166,7 @@ ANDROIDCONNECTION_ADB_PORT=5038 open build/AndroidConnection.app
 - **中文输入**：投屏页底部输入框或剪贴板页输入文本，点击发送后会粘贴到手机当前焦点输入框
 - **剪贴板**：手机复制的内容会自动出现在 Mac 剪贴板；可在设置关闭自动同步
 - **音频**：首次开启需要约 1 秒建立通道；手机需 Android 13+。USB 与无线均支持音频转发；USB 下请直连 Mac 端口，避免经过不稳定 Hub。
-- **护屏息屏**：自动模式把亮度设为 0（部分 Xiaomi 会钳制到 2）；底部“关闭手机屏幕”按钮通过视频控制通道发送 `SET_SCREEN_POWER_MODE=OFF`，`SurfaceFlinger powerMode=Off` 时画面仍继续，但部分机型可能同时停止音频采集，停止投屏会恢复显示电源并唤醒。连接设备时会临时把 `screen_off_timeout` 延长到 10 分钟，断开连接或退出应用后恢复原值；投屏不再额外开启 `stayon usb`。
+- **护屏息屏**：自动模式把亮度设为 0（部分 Xiaomi 会钳制到 2）；底部“关闭手机屏幕”按钮通过视频控制通道发送 `SET_SCREEN_POWER_MODE=OFF`，`SurfaceFlinger powerMode=Off` 时画面仍继续，但部分机型可能同时停止音频采集，停止投屏会恢复显示电源并唤醒。打开投屏时会临时把 `screen_off_timeout` 设为 300 秒，停止投屏或退出应用后恢复原值；投屏期间临时关闭 `stayon usb`，避免阻止自动锁屏。
 - **日志**：`~/Library/Logs/AndroidConnection/androidconnection.log`
 
 界面自检（无需屏幕录制权限，应用渲染自身窗口）：

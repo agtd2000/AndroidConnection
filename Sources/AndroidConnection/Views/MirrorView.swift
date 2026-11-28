@@ -1,6 +1,10 @@
 import SwiftUI
 import AppKit
 
+extension Notification.Name {
+    static let toggleMirrorMini = Notification.Name("AndroidConnection.toggleMirrorMini")
+}
+
 struct MirrorView: View {
     @ObservedObject var session: MirrorSession
     @EnvironmentObject private var model: AppModel
@@ -13,19 +17,21 @@ struct MirrorView: View {
                     header
                     Divider()
                 }
-                videoStage
+                if ui.mini {
+                    GeometryReader { _ in videoStage }
+                    miniBar
+                } else {
+                    videoStage
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if ui.fullscreen {
-                    fullscreenBar
-                } else if !ui.mini {
-                    inputBar
-                    controlBar
-                    footer
+                    if ui.fullscreen {
+                        fullscreenBar
+                    } else {
+                        inputBar
+                        controlBar
+                        footer
+                    }
                 }
-            }
-
-            if ui.mini {
-                miniBar
             }
         }
         .background((ui.fullscreen || ui.mini) ? Color.black : Color(nsColor: .windowBackgroundColor))
@@ -37,6 +43,10 @@ struct MirrorView: View {
         }
         .onChange(of: model.settings.audioForwarding) { enabled in
             if session.isRunning { session.setAudioEnabled(enabled) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleMirrorMini)) { _ in
+            guard model.section == .mirror, session.isRunning else { return }
+            toggleMini()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
             guard let window = note.object as? NSWindow, window === mirrorWindow else { return }
@@ -207,106 +217,72 @@ struct MirrorView: View {
         .background(Color.black.opacity(0.92))
     }
 
-    /// Compact floating controls used by mini mode. The bar only appears when
-    /// the pointer is inside the mirror window, so the video can otherwise use
-    /// the complete window area.
+    /// Bottom status bar used by mini mode. It is part of the window layout,
+    /// below the mirrored video, so it never covers the phone screen.
     private var miniBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(width: 20, height: 26)
-                .contentShape(Rectangle())
-                .help("拖动控制条任意位置可移动")
-            Divider().frame(height: 18).overlay(Color.white.opacity(0.15))
-            fullscreenButton("chevron.backward", "返回", width: 60) { session.sendKey(4) }
-            fullscreenButton("house", "主页", width: 60) { session.sendKey(3) }
-            fullscreenButton("square.on.square", "多任务", width: 60) { session.sendKey(187) }
-            Divider().frame(height: 18).overlay(Color.white.opacity(0.15))
-            fullscreenOrientationButton()
+        HStack(spacing: 7) {
+            fullscreenButton("chevron.backward", "返回", width: 34, tint: .blue) { session.sendKey(4) }
+            fullscreenButton("house", "主页", width: 34, tint: .green) { session.sendKey(3) }
+            fullscreenButton("square.on.square", "多任务", width: 34, tint: .orange) { session.sendKey(187) }
+            Divider().frame(height: 18).overlay(Color.white.opacity(0.14))
+            fullscreenOrientationButton(tint: .teal)
             fullscreenButton(
                 session.displayPoweredOff ? "sun.max" : "display",
-                session.displayPoweredOff ? "恢复手机屏幕" : (session.screenOff ? "物理关闭手机屏幕" : "关闭手机屏幕")
+                session.displayPoweredOff ? "恢复手机屏幕" : (session.screenOff ? "物理关闭手机屏幕" : "关闭手机屏幕"),
+                tint: .yellow
             ) {
                 session.toggleScreen()
             }
-            fullscreenButton("speaker.slash.fill", "静音") { session.sendKey(164) }
-            fullscreenButton("speaker.wave.1", "音量 -") { session.sendKey(25) }
-            fullscreenButton("speaker.wave.3", "音量 +") { session.sendKey(24) }
+            fullscreenButton("speaker.slash.fill", "静音", tint: .pink) { session.sendKey(164) }
+            fullscreenButton("speaker.wave.1", "音量 -", tint: .purple) { session.sendKey(25) }
+            fullscreenButton("speaker.wave.3", "音量 +", tint: .purple) { session.sendKey(24) }
             fullscreenButton(
                 session.audioEnabled ? "speaker.wave.2.fill" : "speaker.slash",
-                session.audioEnabled ? "关闭声音转发" : "开启声音转发"
+                session.audioEnabled ? "关闭声音转发" : "开启声音转发",
+                tint: .cyan
             ) {
                 model.settings.audioForwarding.toggle()
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 8)
             if session.audioEnabled { AudioLevelBar(level: session.audioLevel) }
-            fullscreenButton("arrow.up.left.and.arrow.down.right", "退出 Mini，恢复完整界面") {
+            fullscreenButton("arrow.up.left.and.arrow.down.right", "退出 Mini，恢复完整界面", tint: .mint) {
                 toggleMini()
             }
-            fullscreenButton("stop.fill", "停止投屏") { session.stop() }
+            fullscreenButton("stop.fill", "停止投屏", tint: .red) { session.stop() }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Color.black.opacity(model.settings.miniBarOpacity))
-                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(Color.white.opacity(0.12)))
-        )
-        .padding(.horizontal, 14)
-        .padding(.bottom, 14)
-        .offset(x: ui.miniBarOffset.width, y: ui.miniBarOffset.height)
-        .contentShape(Rectangle())
-        .simultaneousGesture(miniBarDragGesture)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .frame(height: 38)
+        .layoutPriority(1)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+        }
         .disabled(!session.isRunning)
         .opacity(session.isRunning ? 1 : 0.55)
     }
 
-    /// Drag the bar away from the bottom edge so it does not cover buttons
-    /// rendered near the bottom of the phone screen. The offset is kept in
-    /// `MirrorUIState` for the lifetime of this mirror view.
-    private var miniBarDragGesture: some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                let now = Date()
-                // A cancelled SwiftUI gesture may skip `onEnded`. Detect a new
-                // mouse-down by the idle gap or by translation restarting at
-                // zero, otherwise the next drag keeps adding to the previous
-                // translation and the bar appears stuck.
-                let idle = ui.miniBarLastDragTime.map { now.timeIntervalSince($0) > 0.25 } ?? true
-                let restarted = abs(value.translation.width) < 0.5 && abs(value.translation.height) < 0.5
-                if !ui.miniBarDragging || idle || restarted {
-                    ui.miniBarDragStart = ui.miniBarOffset
-                    ui.miniBarDragging = true
-                }
-                ui.miniBarLastDragTime = now
-                let x = ui.miniBarDragStart.width + value.translation.width
-                let y = ui.miniBarDragStart.height + value.translation.height
-                ui.miniBarOffset = CGSize(
-                    width: min(180, max(-180, x)),
-                    height: min(0, max(-260, y))
-                )
-            }
-            .onEnded { _ in
-                ui.miniBarDragging = false
-                ui.miniBarDragStart = ui.miniBarOffset
-                ui.miniBarLastDragTime = nil
-            }
-    }
-
-    private func fullscreenButton(_ icon: String, _ help: String, width: CGFloat = 30, action: @escaping () -> Void) -> some View {
+    private func fullscreenButton(
+        _ icon: String,
+        _ help: String,
+        width: CGFloat = 30,
+        tint: Color = .white.opacity(0.9),
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(.system(size: 13, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tint)
                 .frame(width: width, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.white.opacity(0.09))
+                .fill(tint.opacity(0.14))
         )
         .help(help)
     }
@@ -346,17 +322,18 @@ struct MirrorView: View {
         guard let window = mirrorWindow else { return }
         ui.savedWindowFrame = window.frame
         let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
-        let maxWidth = max(320, (visible?.width ?? 1200) - 48)
-        let maxHeight = max(220, (visible?.height ?? 800) - 48)
+        let maxWidth = max(320, (visible?.width ?? 1200) - 80)
+        let maxHeight = max(220, (visible?.height ?? 800) - 180)
         let aspect = max(0.2, videoAspect)
+        let statusBarHeight: CGFloat = 38
         var contentWidth = maxWidth
-        var contentHeight = contentWidth / aspect
-        if contentHeight > maxHeight {
-            contentHeight = maxHeight
-            contentWidth = contentHeight * aspect
+        var videoHeight = contentWidth / aspect
+        if videoHeight + statusBarHeight > maxHeight {
+            videoHeight = max(120, maxHeight - statusBarHeight)
+            contentWidth = videoHeight * aspect
         }
         contentWidth = max(320, contentWidth)
-        contentHeight = max(220, contentHeight)
+        let contentHeight = videoHeight + statusBarHeight
         let chrome = max(0, window.frame.height - window.contentLayoutRect.height)
         let center = NSPoint(x: window.frame.midX, y: window.frame.midY)
         var frame = NSRect(
@@ -370,6 +347,19 @@ struct MirrorView: View {
             frame.origin.y = min(max(frame.origin.y, visible.minY + 12), visible.maxY - frame.height - 12)
         }
         window.setFrame(frame, display: true, animate: true)
+        // SwiftUI can grow the window a few points after the first layout
+        // (titlebar chrome plus the status bar). Re-clamp once layout settles
+        // so the whole mini status bar stays inside the visible screen area.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard ui.mini, let window = mirrorWindow,
+                  let visible = window.screen?.visibleFrame else { return }
+            var actual = window.frame
+            let maxY = visible.maxY - 12
+            if actual.maxY > maxY {
+                actual.origin.y = maxY - actual.height
+                window.setFrame(actual, display: true, animate: false)
+            }
+        }
     }
 
     private func leaveMiniWindow() {
@@ -467,7 +457,7 @@ struct MirrorView: View {
                 Label("Mini", systemImage: "rectangle.compress.vertical")
             }
             .buttonStyle(SecondaryButtonStyle())
-            .help("只显示投屏画面；控制条可调透明度并可拖动")
+            .help("只显示投屏画面；控制条固定在窗口底部状态栏")
 
             Button {
                 toggleFullscreen()
@@ -596,16 +586,16 @@ struct MirrorView: View {
         .help(orientationHelp)
     }
 
-    private func fullscreenOrientationButton() -> some View {
+    private func fullscreenOrientationButton(tint: Color = .white.opacity(0.9)) -> some View {
         Button(action: toggleOrientation) {
-            OrientationGlyph(landscape: session.orientationLandscape, tint: .white.opacity(0.9))
+            OrientationGlyph(landscape: session.orientationLandscape, tint: tint)
                 .frame(width: 30, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.white.opacity(0.09))
+                .fill(tint.opacity(0.14))
         )
         .help(orientationHelp)
     }
@@ -671,8 +661,4 @@ final class MirrorUIState: ObservableObject {
     @Published var mini = false
     @Published var savedWindowFrame: NSRect?
     @Published var textInput = ""
-    @Published var miniBarOffset: CGSize = .zero
-    @Published var miniBarDragStart: CGSize = .zero
-    @Published var miniBarDragging = false
-    @Published var miniBarLastDragTime: Date?
 }

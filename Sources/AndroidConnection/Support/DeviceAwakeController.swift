@@ -1,15 +1,15 @@
 import Foundation
 
-/// Temporarily raises the phone's auto-lock timeout to ten minutes while a
-/// device is connected. The user's original value is restored on disconnect
-/// or application termination, so Android's own setting is not permanently
+/// Temporarily raises the phone's auto-lock timeout while screen mirroring is
+/// active. The user's original value is restored when mirroring stops or the
+/// application terminates, so Android's own setting is not permanently
 /// changed.
 @MainActor
 final class DeviceAwakeController {
     static let shared = DeviceAwakeController()
 
     private let adb = ADB.shared
-    private let targetTimeout = 600_000
+    private let targetTimeout = 300_000
 
     private var serial: String?
     private var savedTimeout: String?
@@ -28,24 +28,23 @@ final class DeviceAwakeController {
         guard token == generation else { return }
 
         serial = newSerial
-        if let current = await timeoutValue(serial: newSerial),
-           let value = Int(current),
-           value > 0,
-           value < targetTimeout {
-            savedTimeout = current
-            let result = try? await adb.shell(
-                "settings put system screen_off_timeout \(targetTimeout)",
-                serial: newSerial,
-                timeout: 8
-            )
-            changedTimeout = result?.succeeded == true
-        }
+        // If a previous run was interrupted while the temporary value was
+        // still active, do not mistake 300000 for the user's baseline.
+        let currentTimeout = await timeoutValue(serial: newSerial) ?? "30000"
+        savedTimeout = currentTimeout == String(targetTimeout) ? "30000" : currentTimeout
+        let result = try? await adb.shell(
+            "settings put system screen_off_timeout \(targetTimeout)",
+            serial: newSerial,
+            timeout: 8
+        )
+        changedTimeout = result?.succeeded == true
 
         // A pre-existing `stay_on_while_plugged_in` (often left by other
         // scrcpy tools) would keep the panel awake forever and defeat the
-        // ten-minute timeout. Disable it only for this connection and restore
+        // five-minute timeout. Disable it only for this connection and restore
         // the user's value afterwards.
-        if let stay = await globalValue("stay_on_while_plugged_in", serial: newSerial), stay != "0" {
+        let currentStayOn = await globalValue("stay_on_while_plugged_in", serial: newSerial)
+        if let stay = currentStayOn, stay != "0" {
             savedStayOn = stay
             let stayResult = try? await adb.shell(
                 "settings put global stay_on_while_plugged_in 0",
@@ -53,6 +52,17 @@ final class DeviceAwakeController {
                 timeout: 8
             )
             changedStayOn = stayResult?.succeeded == true
+        } else {
+            // Already disabled (possibly by an interrupted earlier run):
+            // remember the normal "plugged in = stay awake" value so it can
+            // be put back when mirroring ends.
+            savedStayOn = "2"
+            changedStayOn = true
+            _ = try? await adb.shell(
+                "settings put global stay_on_while_plugged_in 0",
+                serial: newSerial,
+                timeout: 8
+            )
         }
         AppLog.write("awake: timeout=\(savedTimeout ?? "unchanged") stayOn=\(savedStayOn ?? "unchanged") serial=\(newSerial)")
     }
@@ -89,13 +99,15 @@ final class DeviceAwakeController {
                 return nil
             }
         }
+        var timeoutStatus: Int32?
+        var stayStatus: Int32?
         if changedTimeout, let savedTimeout {
-            _ = run(["settings", "put", "system", "screen_off_timeout", savedTimeout])
+            timeoutStatus = run(["settings", "put", "system", "screen_off_timeout", savedTimeout])
         }
         if changedStayOn, let savedStayOn {
-            _ = run(["settings", "put", "global", "stay_on_while_plugged_in", savedStayOn])
+            stayStatus = run(["settings", "put", "global", "stay_on_while_plugged_in", savedStayOn])
         }
-        AppLog.write("awake: restorer timeout=\(savedTimeout ?? "-") stayOn=\(savedStayOn ?? "-") serial=\(serial)")
+        AppLog.write("awake: restorer timeout=\(savedTimeout ?? "-")(\(timeoutStatus.map(String.init) ?? "-")) stayOn=\(savedStayOn ?? "-")(\(stayStatus.map(String.init) ?? "-")) serial=\(serial)")
     }
 
     private func restoreInternal() async {

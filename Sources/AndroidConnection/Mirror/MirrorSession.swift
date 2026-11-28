@@ -210,6 +210,7 @@ final class MirrorSession: ObservableObject {
 
         isRunning = true
         isStarting = false
+        await DeviceAwakeController.shared.activate(serial: serial)
         status = "投屏中"
         AppLog.write("mirror start serial=\(serial) target=\(Int(target.width))x\(Int(target.height)) bitrate=\(bitrate) native=\(settings.quality == .native)")
         startOrientationMonitor()
@@ -305,6 +306,7 @@ final class MirrorSession: ObservableObject {
         usbKeepAliveTask?.cancel()
         usbKeepAliveTask = nil
         control?.keepsUSBWake = false
+        DeviceAwakeController.shared.restoreNow()
         let wasScreenOff = screenOff
         let mode = screenOffMode
         if wasScreenOff, mode == .displayPower {

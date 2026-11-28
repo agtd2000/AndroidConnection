@@ -23,9 +23,6 @@ final class SettingsStore: ObservableObject {
     @Published var autoScreenOff: Bool {
         didSet { defaults.set(autoScreenOff, forKey: Keys.autoScreenOff) }
     }
-    @Published var miniBarOpacity: Double {
-        didSet { defaults.set(miniBarOpacity, forKey: Keys.miniBarOpacity) }
-    }
     @Published var connectionPreference: ConnectionPreference {
         didSet { defaults.set(connectionPreference.rawValue, forKey: Keys.connectionPreference) }
     }
@@ -78,7 +75,6 @@ final class SettingsStore: ObservableObject {
         static let hideDotFiles = "files.hideDotFiles"
         static let audioForwarding = "mirror.audioForwarding"
         static let autoScreenOff = "mirror.autoScreenOff"
-        static let miniBarOpacity = "mirror.miniBarOpacity"
         static let connectionPreference = "connection.preference"
         static let adbPort = "connection.adbPort"
         static let syncDeviceClipboard = "clipboard.syncFromDevice"
@@ -100,7 +96,6 @@ final class SettingsStore: ObservableObject {
         hideDotFiles = defaults.object(forKey: Keys.hideDotFiles) as? Bool ?? false
         audioForwarding = defaults.object(forKey: Keys.audioForwarding) as? Bool ?? true
         autoScreenOff = defaults.object(forKey: Keys.autoScreenOff) as? Bool ?? true
-        miniBarOpacity = min(0.95, max(0.15, defaults.object(forKey: Keys.miniBarOpacity) as? Double ?? 0.55))
         connectionPreference = ConnectionPreference(rawValue: defaults.string(forKey: Keys.connectionPreference) ?? "") ?? .auto
         let savedPort = defaults.object(forKey: Keys.adbPort) as? Int
         adbPort = savedPort ?? Int(ADB.serverPort) ?? 5037

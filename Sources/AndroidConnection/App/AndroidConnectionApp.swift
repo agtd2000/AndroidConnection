@@ -329,6 +329,11 @@ struct AndroidConnectionApp: App {
                     Task { _ = await model.takeScreenshot() }
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+
+                Button("Mini 窗口") {
+                    NotificationCenter.default.post(name: .toggleMirrorMini, object: nil)
+                }
+                .keyboardShortcut("m", modifiers: [.command, .option])
             }
         }
     }
