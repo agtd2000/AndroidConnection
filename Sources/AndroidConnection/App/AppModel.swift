@@ -65,8 +65,11 @@ final class AppModel: ObservableObject {
             apps = nil
             clipboard = nil
             mirror = nil
+            Task { await DeviceAwakeController.shared.restore() }
             return
         }
+
+        Task { await DeviceAwakeController.shared.activate(serial: serial) }
 
         let control = ScrcpyControl(serial: serial)
         self.control = control

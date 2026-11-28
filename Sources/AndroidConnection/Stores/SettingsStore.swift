@@ -55,6 +55,9 @@ final class SettingsStore: ObservableObject {
     @Published var scrollDirection: MouseScrollDirection {
         didSet { defaults.set(scrollDirection.rawValue, forKey: Keys.scrollDirection) }
     }
+    @Published var scrollStep: Double {
+        didSet { defaults.set(scrollStep, forKey: Keys.scrollStep) }
+    }
     @Published var arrowKeysSwipeInApps: Bool {
         didSet { defaults.set(arrowKeysSwipeInApps, forKey: Keys.arrowKeysSwipeInApps) }
     }
@@ -82,6 +85,7 @@ final class SettingsStore: ObservableObject {
         static let keyboardMapping = "input.keyboardMapping"
         static let mouseMapping = "input.mouseMapping"
         static let scrollDirection = "input.mouseScrollDirection"
+        static let scrollStep = "input.mouseScrollStep"
         static let arrowKeysSwipeInApps = "input.arrowKeysSwipeInApps"
         static let downloadFolder = "files.downloadFolder"
         static let savedDevices = "wifi.savedDevices"
@@ -114,6 +118,7 @@ final class SettingsStore: ObservableObject {
             mouseMapping = .defaults
         }
         scrollDirection = MouseScrollDirection(rawValue: defaults.string(forKey: Keys.scrollDirection) ?? "") ?? .normal
+        scrollStep = min(0.40, max(0.05, defaults.object(forKey: Keys.scrollStep) as? Double ?? 0.15))
         arrowKeysSwipeInApps = defaults.object(forKey: Keys.arrowKeysSwipeInApps) as? Bool ?? true
         downloadFolder = defaults.string(forKey: Keys.downloadFolder) ?? SettingsStore.defaultDownloadFolder
         if let data = defaults.data(forKey: Keys.savedDevices),

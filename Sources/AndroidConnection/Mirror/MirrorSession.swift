@@ -55,9 +55,6 @@ final class MirrorSession: ObservableObject {
     private var didChangeOrientation = false
     private var savedBrightness: String?
     private var savedBrightnessMode: String?
-    private var savedStayOn: String?
-    private var savedScreenOffTimeout: String?
-    private var usbStayOnActive = false
     private var usbKeepAliveTask: Task<Void, Never>?
     private var streamID = UUID()
     private var isStartingVideo = false
@@ -246,32 +243,15 @@ final class MirrorSession: ObservableObject {
             }
         }
         if !isWireless {
-            // Xiaomi drops the ADB USB transport when the panel sleeps. Keep
-            // the display awake for the whole USB mirror session, even when
-            // the user disabled the automatic dimming option.
-            if savedStayOn == nil {
-                savedStayOn = await settingValue("stay_on_while_plugged_in", namespace: "global")
-            }
-            if savedScreenOffTimeout == nil {
-                savedScreenOffTimeout = await settingValue("screen_off_timeout", namespace: "system")
-            }
-            usbStayOnActive = true
-            _ = try? await adb.shell("svc power stayon usb", serial: serial, timeout: 8)
-            // `svc power stayon usb` is not enough on some Xiaomi builds: the
-            // panel still sleeps after the normal timeout and the USB ADB
-            // transport disappears with it. Extend the timeout while the
-            // mirror owns the USB connection, then restore it on stop.
-            _ = try? await adb.shell("settings put system screen_off_timeout 2147483647", serial: serial, timeout: 8)
-            // Do not wake the panel when automatic screen-off is enabled.
-            // The delayed check below has to observe the real starting state
-            // instead of the wake-up injected by the USB keepalive path.
+            // The phone's auto-lock timeout is managed by
+            // `DeviceAwakeController` for the whole connection, so the mirror
+            // must not override it with `stayon usb`.
             if !settings.autoScreenOff, !screenOff {
                 _ = try? await adb.shell("input keyevent 224", serial: serial, timeout: 8)
             }
             control?.keepsUSBWake = true
             startUSBKeepAlive()
         } else if !settings.autoScreenOff {
-            _ = try? await adb.shell("svc power stayon usb", serial: serial, timeout: 8)
             _ = try? await adb.shell("input keyevent 224", serial: serial, timeout: 8)
         }
     }
@@ -337,17 +317,12 @@ final class MirrorSession: ObservableObject {
         isTransitioning = false
         clearOrientationNotice()
         if wasScreenOff {
-            // Always restore the settings we may have changed (brightness,
-            // stay-awake, timeout). With display-power mode those are mostly
-            // no-ops, but it also restores stay_on/screen_off_timeout.
+            // Restore the brightness settings this session may have changed.
             restoreScreenBrightnessSync()
             screenOff = false
             displayPoweredOff = false
             screenOffMode = .none
-        } else if usbStayOnActive {
-            restoreScreenBrightnessSync()
         }
-        usbStayOnActive = false
         if restoreRotation {
             restoreRotationIfNeeded()
         }
@@ -479,8 +454,6 @@ final class MirrorSession: ObservableObject {
                     AppLog.write("mirror retry: adb device missing, restarting server")
                     try? await self.adb.restartServer()
                 }
-                _ = try? await self.adb.shell("svc power stayon usb", serial: self.serial, timeout: 5)
-                _ = try? await self.adb.shell("settings put system screen_off_timeout 2147483647", serial: self.serial, timeout: 5)
                 _ = try? await self.adb.shell("input keyevent 224", serial: self.serial, timeout: 5)
             }
         }
@@ -890,12 +863,7 @@ final class MirrorSession: ObservableObject {
             if savedBrightnessMode == nil {
                 savedBrightnessMode = await settingValue("screen_brightness_mode", namespace: "system")
             }
-            if savedStayOn == nil {
-                savedStayOn = await settingValue("stay_on_while_plugged_in", namespace: "global")
-            }
-
             let usb = !isWireless
-            _ = try? await adb.shell("svc power stayon \(usb ? "usb" : "true")", serial: serial, timeout: 8)
             _ = try? await adb.shell("settings put system screen_brightness_mode 0", serial: serial, timeout: 8)
             // Some Xiaomi builds clamp 0 to 1; the control-channel path above
             // is preferred. This is only the compatibility fallback.
@@ -905,7 +873,7 @@ final class MirrorSession: ObservableObject {
                 screenOff = true
                 displayPoweredOff = false
                 screenOffMode = .dimmed
-                AppLog.write("mirror screenOff=true via=brightness0 fallback usb=\(usb) saved=\(savedBrightness ?? "nil") mode=\(savedBrightnessMode ?? "nil") stay=\(savedStayOn ?? "nil")")
+                AppLog.write("mirror screenOff=true via=brightness0 fallback usb=\(usb) saved=\(savedBrightness ?? "nil") mode=\(savedBrightnessMode ?? "nil")")
             } else {
                 errorMessage = result?.messages.trimmed ?? "无法关闭手机屏幕"
                 await restoreScreenBrightness()
@@ -944,18 +912,8 @@ final class MirrorSession: ObservableObject {
         if let brightness = savedBrightness {
             _ = try? await adb.shell("settings put system screen_brightness \(brightness)", serial: serial, timeout: 8)
         }
-        if let stayOn = savedStayOn {
-            _ = try? await adb.shell("settings put global stay_on_while_plugged_in \(stayOn)", serial: serial, timeout: 8)
-        } else {
-            _ = try? await adb.shell("svc power stayon false", serial: serial, timeout: 8)
-        }
-        if let timeout = savedScreenOffTimeout {
-            _ = try? await adb.shell("settings put system screen_off_timeout \(timeout)", serial: serial, timeout: 8)
-        }
         savedBrightness = nil
         savedBrightnessMode = nil
-        savedStayOn = nil
-        savedScreenOffTimeout = nil
     }
 
     private func restoreScreenBrightnessSync() {
@@ -965,18 +923,8 @@ final class MirrorSession: ObservableObject {
         if let brightness = savedBrightness {
             adbShellSync("settings put system screen_brightness \(brightness)")
         }
-        if let stayOn = savedStayOn {
-            adbShellSync("settings put global stay_on_while_plugged_in \(stayOn)")
-        } else {
-            adbShellSync("svc power stayon false")
-        }
-        if let timeout = savedScreenOffTimeout {
-            adbShellSync("settings put system screen_off_timeout \(timeout)")
-        }
         savedBrightness = nil
         savedBrightnessMode = nil
-        savedStayOn = nil
-        savedScreenOffTimeout = nil
     }
 
     func toggleScreen() {
@@ -1134,7 +1082,8 @@ final class MirrorSession: ObservableObject {
         let size = inputSurfaceSize()
         let x = Int(size.width / 2)
         let y = Int(size.height / 2)
-        let endY = y - Int(direction * size.height * 0.55)
+        let step = CGFloat(min(0.40, max(0.05, settings.scrollStep)))
+        let endY = y - Int(direction * size.height * step)
         Task { [weak self] in
             guard let self else { return }
             _ = try? await self.adb.shell(

@@ -3,7 +3,7 @@ import AppKit
 
 enum AppInfo {
     static let name = "AndroidConnection"
-    static let version = "1.2.20"
+    static let version = "1.2.21"
     static let build = "1"
     static let scrcpyServerVersion = "5.0.1"
 }
@@ -232,7 +232,7 @@ struct SettingsContent: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
-            Text("开启后投屏 3 秒自动熄灭手机物理屏幕；关闭后保持手机屏幕常亮并阻止自动锁屏。两种状态都只影响手机屏幕，投屏画面、点击和键盘操作始终可用。优先通过 scrcpy 控制通道关闭显示电源，物理屏幕熄灭但 SurfaceFlinger 继续合成；若控制通道不可用，则回退到最低亮度。音频捕获需要 Android 13 或更高版本。画质与码率修改只重启画面，不会打断音频。")
+            Text("开启后投屏 3 秒自动熄灭手机物理屏幕；关闭后不主动熄灭手机屏幕。连接设备时会把手机自动锁屏临时延长到 10 分钟，断开连接或退出应用后恢复原值。两种状态都只影响手机屏幕，投屏画面、点击和键盘操作始终可用。优先通过 scrcpy 控制通道关闭显示电源，物理屏幕熄灭但 SurfaceFlinger 继续合成；若控制通道不可用，则回退到最低亮度。音频捕获需要 Android 13 或更高版本。画质与码率修改只重启画面，不会打断音频。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -263,13 +263,22 @@ struct SettingsContent: View {
                     Text(direction.title).tag(direction)
                 }
             }
-            Text("左键点击和拖动仍用于手机触控；右键、中键只在投屏画面获得焦点时生效。默认右键返回、中键打开多任务。")
+            HStack {
+                Text("滚轮滚动幅度")
+                Slider(value: $settings.scrollStep, in: 0.05...0.40, step: 0.01)
+                Text("\(Int(settings.scrollStep * 100))%")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 42, alignment: .trailing)
+            }
+            Text("每次滚轮触发的画面滚动距离；数值越小越细腻。左键点击和拖动仍用于手机触控；右键、中键只在投屏画面获得焦点时生效。默认右键返回、中键打开多任务。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             HStack {
                 Button("恢复默认鼠标映射") {
                     settings.mouseMapping = .defaults
                     settings.scrollDirection = .normal
+                    settings.scrollStep = 0.15
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 Spacer()

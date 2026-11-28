@@ -269,11 +269,18 @@ struct MirrorView: View {
     private var miniBarDragGesture: some Gesture {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
-                if !ui.miniBarDragging {
+                let now = Date()
+                // A cancelled SwiftUI gesture may skip `onEnded`. Detect a new
+                // mouse-down by the idle gap or by translation restarting at
+                // zero, otherwise the next drag keeps adding to the previous
+                // translation and the bar appears stuck.
+                let idle = ui.miniBarLastDragTime.map { now.timeIntervalSince($0) > 0.25 } ?? true
+                let restarted = abs(value.translation.width) < 0.5 && abs(value.translation.height) < 0.5
+                if !ui.miniBarDragging || idle || restarted {
                     ui.miniBarDragStart = ui.miniBarOffset
                     ui.miniBarDragging = true
-                    AppLog.write("mini drag start translation=\(value.translation) offset=\(ui.miniBarOffset)")
                 }
+                ui.miniBarLastDragTime = now
                 let x = ui.miniBarDragStart.width + value.translation.width
                 let y = ui.miniBarDragStart.height + value.translation.height
                 ui.miniBarOffset = CGSize(
@@ -284,7 +291,7 @@ struct MirrorView: View {
             .onEnded { _ in
                 ui.miniBarDragging = false
                 ui.miniBarDragStart = ui.miniBarOffset
-                AppLog.write("mini drag end offset=\(ui.miniBarOffset)")
+                ui.miniBarLastDragTime = nil
             }
     }
 
@@ -667,4 +674,5 @@ final class MirrorUIState: ObservableObject {
     @Published var miniBarOffset: CGSize = .zero
     @Published var miniBarDragStart: CGSize = .zero
     @Published var miniBarDragging = false
+    @Published var miniBarLastDragTime: Date?
 }

@@ -34,7 +34,9 @@ struct RootView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            // Do not leave the phone physically powered off after quit.
+            // Do not leave the phone physically powered off or its temporary
+            // auto-lock timeout behind after quit.
+            DeviceAwakeController.shared.restoreNow()
             model.mirror?.stop()
         }
     }
